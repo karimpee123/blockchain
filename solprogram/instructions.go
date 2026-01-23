@@ -171,3 +171,130 @@ func BuildRefundInstruction(
 		RefundDisc[:],
 	), nil
 }
+
+// BuildCreateDirectFixedInstruction builds DirectFixed envelope
+func BuildCreateDirectFixedInstruction(
+	programID solana.PublicKey,
+	user solana.PublicKey,
+	envelopeID uint64,
+	allowedAddress string,
+	amount uint64,
+	expiryHours uint64,
+) (solana.Instruction, error) {
+	// Derive PDAs
+	userState, _, _ := DeriveUserStatePDA(programID, user)
+	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
+
+	// Parse allowed address
+	allowedPubkey := solana.MustPublicKeyFromBase58(allowedAddress)
+
+	// Build instruction data
+	// Format: discriminator(8) + variant(1) + allowed_address(32) + amount(8) + expiry(8)
+	data := make([]byte, 0, 64)
+	data = append(data, CreateDisc[:]...)         // discriminator (8 bytes)
+	data = append(data, 0)                        // variant 0 = DirectFixed
+	data = append(data, allowedPubkey.Bytes()...) // allowed_address (32 bytes)
+
+	amountBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(amountBytes, amount)
+	data = append(data, amountBytes...) // amount (8 bytes)
+
+	expiryBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
+	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
+
+	return solana.NewInstruction(
+		programID,
+		solana.AccountMetaSlice{
+			solana.Meta(userState).WRITE(),
+			solana.Meta(envelope).WRITE(),
+			solana.Meta(user).WRITE().SIGNER(),
+			solana.Meta(solana.SystemProgramID),
+		},
+		data,
+	), nil
+}
+
+// BuildCreateGroupFixedInstruction builds GroupFixed envelope
+func BuildCreateGroupFixedInstruction(
+	programID solana.PublicKey,
+	user solana.PublicKey,
+	envelopeID uint64,
+	totalUsers uint64,
+	amountPerUser uint64,
+	expiryHours uint64,
+) (solana.Instruction, error) {
+	userState, _, _ := DeriveUserStatePDA(programID, user)
+	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
+
+	// Build instruction data
+	// Format: discriminator(8) + variant(1) + total_users(8) + amount_per_user(8) + expiry(8)
+	data := make([]byte, 0, 40)
+	data = append(data, CreateDisc[:]...) // discriminator (8 bytes)
+	data = append(data, 1)                // variant 1 = GroupFixed
+
+	totalUsersBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(totalUsersBytes, totalUsers)
+	data = append(data, totalUsersBytes...) // total_users (8 bytes)
+
+	amountPerUserBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(amountPerUserBytes, amountPerUser)
+	data = append(data, amountPerUserBytes...) // amount_per_user (8 bytes)
+
+	expiryBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
+	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
+
+	return solana.NewInstruction(
+		programID,
+		solana.AccountMetaSlice{
+			solana.Meta(userState).WRITE(),
+			solana.Meta(envelope).WRITE(),
+			solana.Meta(user).WRITE().SIGNER(),
+			solana.Meta(solana.SystemProgramID),
+		},
+		data,
+	), nil
+}
+
+// BuildCreateGroupRandomInstruction builds GroupRandom envelope
+func BuildCreateGroupRandomInstruction(
+	programID solana.PublicKey,
+	user solana.PublicKey,
+	envelopeID uint64,
+	totalAmount uint64,
+	maxClaimers uint64,
+	expiryHours uint64,
+) (solana.Instruction, error) {
+	userState, _, _ := DeriveUserStatePDA(programID, user)
+	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
+
+	// Build instruction data
+	// Format: discriminator(8) + variant(1) + total_amount(8) + max_claimers(8) + expiry(8)
+	data := make([]byte, 0, 40)
+	data = append(data, CreateDisc[:]...) // discriminator (8 bytes)
+	data = append(data, 2)                // variant 2 = GroupRandom
+
+	totalAmountBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(totalAmountBytes, totalAmount)
+	data = append(data, totalAmountBytes...) // total_amount (8 bytes)
+
+	maxClaimersBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(maxClaimersBytes, maxClaimers)
+	data = append(data, maxClaimersBytes...) // max_claimers (8 bytes)
+
+	expiryBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
+	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
+
+	return solana.NewInstruction(
+		programID,
+		solana.AccountMetaSlice{
+			solana.Meta(userState).WRITE(),
+			solana.Meta(envelope).WRITE(),
+			solana.Meta(user).WRITE().SIGNER(),
+			solana.Meta(solana.SystemProgramID),
+		},
+		data,
+	), nil
+}
