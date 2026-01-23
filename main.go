@@ -7,28 +7,46 @@ import (
 
 	"github.com/gagliardetto/solana-go/rpc"
 
-	src "test/chainsol"
+	bnb "test/chainbnb"
+	sol "test/chainsol"
 )
 
 func main() {
-	// Initialize Solana client with Alchemy
-	solChain := src.NewSolChain(src.Config{
+	// Initialize Solana client
+	solChain := sol.NewSolChain(sol.Config{
 		RPCURL:  rpc.DevNet_RPC,
 		WSURL:   rpc.DevNet_WS,
 		Network: rpc.DevNet.Name,
 	})
 
-	// Health check
+	// Initialize BNB Chain client
+	bnbChain := bnb.NewBNBChain(bnb.Config{
+		RPCURL:  "https://data-seed-prebsc-1-s1.binance.org:8545/", // BSC Testnet
+		ChainID: 97,
+		Network: "testnet",
+	})
+
+	// Health checks
 	if err := solChain.HealthCheck(); err != nil {
 		log.Fatalf("Solana health check failed: %v", err)
 	}
+	if err := bnbChain.HealthCheck(); err != nil {
+		log.Fatalf("BNB Chain health check failed: %v", err)
+	}
 
-	// Setup routes
-	http.HandleFunc("/api/v1/transaction/create", solChain.HandleCreateTransaction)
-	http.HandleFunc("/api/v1/transaction/sign", solChain.HandleSignTransaction)
-	http.HandleFunc("/api/v1/transaction/send", solChain.HandleSendTransaction)
-	http.HandleFunc("/api/v1/transaction/status", solChain.HandleGetTransactionStatus)
-	http.HandleFunc("/api/v1/transaction/history", solChain.HandleGetTransactionHistory)
+	// Solana routes
+	http.HandleFunc("/api/v1/sol/transaction/create", solChain.HandleCreateTransaction)
+	http.HandleFunc("/api/v1/sol/transaction/sign", solChain.HandleSignTransaction)
+	http.HandleFunc("/api/v1/sol/transaction/send", solChain.HandleSendTransaction)
+	http.HandleFunc("/api/v1/sol/transaction/status", solChain.HandleGetTransactionStatus)
+	http.HandleFunc("/api/v1/sol/transaction/history", solChain.HandleGetTransactionHistory)
+
+	// BNB routes
+	http.HandleFunc("/api/v1/bnb/transaction/create", bnbChain.HandleCreateTransaction)
+	http.HandleFunc("/api/v1/bnb/transaction/sign", bnbChain.HandleSignTransaction)
+	http.HandleFunc("/api/v1/bnb/transaction/send", bnbChain.HandleSendTransaction)
+	http.HandleFunc("/api/v1/bnb/transaction/status", bnbChain.HandleGetTransactionStatus)
+	http.HandleFunc("/api/v1/bnb/transaction/history", bnbChain.HandleGetTransactionHistory)
 
 	// Health endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +61,8 @@ func main() {
 	}
 
 	log.Printf("🚀 Server starting on port %s", port)
+	log.Printf("✅ Solana DevNet connected")
+	log.Printf("✅ BNB Testnet connected")
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
