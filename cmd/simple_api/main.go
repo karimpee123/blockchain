@@ -7,31 +7,31 @@ import (
 
 	"github.com/gagliardetto/solana-go/rpc"
 
-	bnb "test/chainbnb"
-	sol "test/chainsol"
+	"blockchain/chainbnb"
+	"blockchain/chainsol"
 )
 
 func main() {
-	// Initialize Solana client
-	solChain := sol.NewSolChain(sol.Config{
+	// Initialize Sol client
+	solChain := chainsol.NewSolChain(chainsol.Config{
 		RPCURL:  rpc.DevNet_RPC,
 		WSURL:   rpc.DevNet_WS,
 		Network: rpc.DevNet.Name,
 	})
 
 	// Initialize BNB Chain client
-	bnbChain := bnb.NewBNBChain(bnb.Config{
-		RPCURL:  "https://data-seed-prebsc-1-s1.binance.org:8545/", // BSC Testnet
+	bnbChain := chainbnb.NewBNBChain(chainbnb.Config{
+		RPCURL:  "https://data-seed-prebsc-1-s1.binance.org:8545/",
 		ChainID: 97,
 		Network: "testnet",
 	})
 
 	// Health checks
 	if err := solChain.HealthCheck(); err != nil {
-		log.Fatalf("Solana health check failed: %v", err)
+		log.Fatalf("❌ Solana health check failed: %v", err)
 	}
 	if err := bnbChain.HealthCheck(); err != nil {
-		log.Fatalf("BNB Chain health check failed: %v", err)
+		log.Fatalf("❌ BNB Chain health check failed: %v", err)
 	}
 
 	// Solana routes
@@ -54,15 +54,18 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	log.Printf("🚀 Server starting on port %s", port)
+	log.Printf("🚀 Simple API Server starting on port %s", port)
 	log.Printf("✅ Solana DevNet connected")
 	log.Printf("✅ BNB Testnet connected")
+	log.Printf("📡 Endpoints:")
+	log.Printf("   - SOL: /api/v1/sol/*")
+	log.Printf("   - BNB: /api/v1/bnb/*")
+
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}

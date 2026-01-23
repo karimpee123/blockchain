@@ -1,4 +1,4 @@
-package src
+package chainsol
 
 import (
 	"encoding/base64"
