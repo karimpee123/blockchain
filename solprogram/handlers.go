@@ -24,13 +24,10 @@ const (
 type CreateEnvelopeRequest struct {
 	UserAddress    string              `json:"user_address"`
 	EnvelopeType   EnvelopeTypeRequest `json:"envelope_type"`
+	TotalAmount    uint64              `json:"total_amount"`
+	TotalUsers     uint64              `json:"total_users"`
 	ExpiryHours    uint64              `json:"expiry_hours"`
-	AllowedAddress *string             `json:"allowed_address,omitempty"` // For DirectFixed
-	Amount         *uint64             `json:"amount,omitempty"`          // For DirectFixed
-	TotalUsers     *uint64             `json:"total_users,omitempty"`     // For GroupFixed
-	AmountPerUser  *uint64             `json:"amount_per_user,omitempty"` // For GroupFixed
-	TotalAmount    *uint64             `json:"total_amount,omitempty"`    // For GroupRandom
-	MaxClaimers    *uint64             `json:"max_claimers,omitempty"`    // For GroupRandom
+	AllowedAddress *string             `json:"allowed_address,omitempty"`
 }
 
 type ClaimEnvelopeRequest struct {
@@ -59,7 +56,6 @@ type Response struct {
 	ProgramLogs    []string `json:"program_logs,omitempty"`
 }
 
-// HandleCreateEnvelope handles create envelope request (with auto-init)
 func (c *Client) HandleCreateEnvelope(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -72,13 +68,47 @@ func (c *Client) HandleCreateEnvelope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate envelope type
+	// Validate required fields
 	if req.EnvelopeType == "" {
 		json.NewEncoder(w).Encode(Response{
 			Success: false,
 			Message: "envelope_type is required",
 		})
 		return
+	}
+
+	if req.TotalAmount == 0 {
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "total_amount must be greater than 0",
+		})
+		return
+	}
+
+	if req.TotalUsers == 0 {
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "total_users must be greater than 0",
+		})
+		return
+	}
+
+	// Validate DirectFixed
+	if req.EnvelopeType == EnvelopeTypeDirectFixed {
+		if req.AllowedAddress == nil || *req.AllowedAddress == "" {
+			json.NewEncoder(w).Encode(Response{
+				Success: false,
+				Message: "DirectFixed requires allowed_address",
+			})
+			return
+		}
+		if req.TotalUsers != 1 {
+			json.NewEncoder(w).Encode(Response{
+				Success: false,
+				Message: "DirectFixed must have total_users = 1",
+			})
+			return
+		}
 	}
 
 	user := solana.MustPublicKeyFromBase58(req.UserAddress)
@@ -113,69 +143,50 @@ func (c *Client) HandleCreateEnvelope(w http.ResponseWriter, r *http.Request) {
 	// Calculate next envelope ID
 	nextEnvelopeID := lastEnvelopeID + 1
 
-	// Build create instruction based on envelope type
+	// Build create instruction (UNIFIED)
 	var createInstruction solana.Instruction
-	var totalAmount uint64
 
 	switch req.EnvelopeType {
 	case EnvelopeTypeDirectFixed:
-		if req.AllowedAddress == nil || req.Amount == nil {
-			json.NewEncoder(w).Encode(Response{
-				Success: false,
-				Message: "DirectFixed requires: allowed_address, amount",
-			})
-			return
-		}
-		createInstruction, err = BuildCreateDirectFixedInstruction(
+		createInstruction, err = BuildCreateEnvelopeInstruction(
 			c.ProgramID,
 			user,
 			nextEnvelopeID,
-			*req.AllowedAddress,
-			*req.Amount,
+			EnvelopeTypeDirectFixed,
+			req.TotalAmount,
+			req.TotalUsers,
 			req.ExpiryHours,
+			req.AllowedAddress, // Only for DirectFixed
 		)
-		totalAmount = *req.Amount
 
 	case EnvelopeTypeGroupFixed:
-		if req.TotalUsers == nil || req.AmountPerUser == nil {
-			json.NewEncoder(w).Encode(Response{
-				Success: false,
-				Message: "GroupFixed requires: total_users, amount_per_user",
-			})
-			return
-		}
-		createInstruction, err = BuildCreateGroupFixedInstruction(
+		createInstruction, err = BuildCreateEnvelopeInstruction(
 			c.ProgramID,
 			user,
 			nextEnvelopeID,
-			*req.TotalUsers,
-			*req.AmountPerUser,
+			EnvelopeTypeGroupFixed,
+			req.TotalAmount,
+			req.TotalUsers,
 			req.ExpiryHours,
+			nil, // No allowed_address
 		)
-		totalAmount = *req.TotalUsers * *req.AmountPerUser
 
 	case EnvelopeTypeGroupRandom:
-		if req.TotalAmount == nil || req.MaxClaimers == nil {
-			json.NewEncoder(w).Encode(Response{
-				Success: false,
-				Message: "GroupRandom requires: total_amount, max_claimers",
-			})
-			return
-		}
-		createInstruction, err = BuildCreateGroupRandomInstruction(
+		createInstruction, err = BuildCreateEnvelopeInstruction(
 			c.ProgramID,
 			user,
 			nextEnvelopeID,
-			*req.TotalAmount,
-			*req.MaxClaimers,
+			EnvelopeTypeGroupRandom,
+			req.TotalAmount,
+			req.TotalUsers,
 			req.ExpiryHours,
+			nil, // No allowed_address
 		)
-		totalAmount = *req.TotalAmount
 
 	default:
 		json.NewEncoder(w).Encode(Response{
 			Success: false,
-			Message: fmt.Sprintf("Invalid envelope_type: %s. Must be: direct_fixed, group_fixed, or group_random", req.EnvelopeType),
+			Message: fmt.Sprintf("Invalid envelope_type: %s", req.EnvelopeType),
 		})
 		return
 	}
@@ -200,8 +211,8 @@ func (c *Client) HandleCreateEnvelope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	message := fmt.Sprintf("%s envelope #%d created (%.3f SOL)",
-		req.EnvelopeType, nextEnvelopeID, float64(totalAmount)/1e9)
+	message := fmt.Sprintf("%s envelope #%d created (%.9f SOL, %d users)",
+		req.EnvelopeType, nextEnvelopeID, float64(req.TotalAmount)/1e9, req.TotalUsers)
 	if !exists {
 		message += " (including user init)"
 	}

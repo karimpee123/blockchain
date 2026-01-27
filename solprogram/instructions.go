@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -94,44 +95,101 @@ func BuildInitUserStateInstruction(
 	), nil
 }
 
-// BuildCreateInstruction builds create envelope instruction (simplified - DirectFixed only)
-func BuildCreateInstruction(
+// BuildCreateEnvelopeInstruction builds create envelope instruction (simplified - DirectFixed only)
+func BuildCreateEnvelopeInstruction(
 	programID solana.PublicKey,
 	user solana.PublicKey,
 	envelopeID uint64,
-	amount uint64,
+	envelopeType EnvelopeTypeRequest,
+	totalAmount uint64,
+	totalUsers uint64,
 	expiryHours uint64,
+	allowedAddress *string,
 ) (solana.Instruction, error) {
-	// Derive PDAs
-	userState, _, _ := DeriveUserStatePDA(programID, user)
-	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
+	userStatePDA, _, _ := DeriveUserStatePDA(programID, user)
+	envelopePDA, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
 
-	// Build instruction data
-	// Format: discriminator(8) + envelope_type + expiry(8)
-	data := make([]byte, 0, 64)
-	data = append(data, CreateDisc[:]...)
+	// ✅ Discriminator dari IDL
+	discriminator := []byte{24, 30, 200, 40, 5, 28, 7, 119}
 
-	// DirectFixed type (variant 0)
-	data = append(data, 0)               // variant index
-	data = append(data, user.Bytes()...) // allowed_address (32 bytes)
+	// Build envelope_type enum
+	var envelopeTypeData []byte
 
+	switch envelopeType {
+	case EnvelopeTypeDirectFixed:
+		if allowedAddress == nil {
+			return nil, fmt.Errorf("allowed_address required for DirectFixed")
+		}
+		allowedPubkey := solana.MustPublicKeyFromBase58(*allowedAddress)
+
+		// Enum: variant (1 byte) + data (32 bytes)
+		envelopeTypeData = make([]byte, 33)
+		envelopeTypeData[0] = 0 // DirectFixed = variant 0
+		copy(envelopeTypeData[1:33], allowedPubkey.Bytes())
+
+	case EnvelopeTypeGroupFixed:
+		envelopeTypeData = []byte{1} // GroupFixed = variant 1
+
+	case EnvelopeTypeGroupRandom:
+		envelopeTypeData = []byte{2} // GroupRandom = variant 2
+
+	default:
+		return nil, fmt.Errorf("invalid envelope type: %s", envelopeType)
+	}
+
+	// Serialize instruction data
+	instructionData := make([]byte, 0)
+
+	// 1. Discriminator (8 bytes)
+	instructionData = append(instructionData, discriminator...)
+
+	// 2. EnvelopeType (1 or 33 bytes)
+	instructionData = append(instructionData, envelopeTypeData...)
+
+	// 3. total_amount (8 bytes LE)
 	amountBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(amountBytes, amount)
-	data = append(data, amountBytes...) // amount (8 bytes)
+	binary.LittleEndian.PutUint64(amountBytes, totalAmount)
+	instructionData = append(instructionData, amountBytes...)
 
+	// 4. total_users (8 bytes LE)
+	usersBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(usersBytes, totalUsers)
+	instructionData = append(instructionData, usersBytes...)
+
+	// 5. expiry_hours (8 bytes LE)
 	expiryBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
-	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
+	instructionData = append(instructionData, expiryBytes...)
+
+	// ✅ DEBUG LOGGING
+	fmt.Printf("\n=== CREATE INSTRUCTION DEBUG ===\n")
+	fmt.Printf("Program ID: %s\n", programID)
+	fmt.Printf("User: %s\n", user)
+	fmt.Printf("User State PDA: %s\n", userStatePDA)
+	fmt.Printf("Envelope PDA: %s\n", envelopePDA)
+	fmt.Printf("Envelope ID: %d\n", envelopeID)
+	fmt.Printf("Envelope Type: %s\n", envelopeType)
+	fmt.Printf("Total Amount: %d\n", totalAmount)
+	fmt.Printf("Total Users: %d\n", totalUsers)
+	fmt.Printf("Expiry Hours: %d\n", expiryHours)
+	fmt.Printf("\nInstruction Data (%d bytes):\n", len(instructionData))
+	fmt.Printf("  Discriminator: %v\n", discriminator)
+	fmt.Printf("  EnvelopeType: %v (len=%d)\n", envelopeTypeData, len(envelopeTypeData))
+	fmt.Printf("  TotalAmount: %v\n", amountBytes)
+	fmt.Printf("  TotalUsers: %v\n", usersBytes)
+	fmt.Printf("  ExpiryHours: %v\n", expiryBytes)
+	fmt.Printf("  Full hex: %x\n", instructionData)
+	fmt.Printf("================================\n\n")
 
 	return solana.NewInstruction(
 		programID,
 		solana.AccountMetaSlice{
-			solana.Meta(userState).WRITE(),
-			solana.Meta(envelope).WRITE(),
+			solana.Meta(userStatePDA).WRITE(),
+			solana.Meta(envelopePDA).WRITE(),
 			solana.Meta(user).WRITE().SIGNER(),
 			solana.Meta(solana.SystemProgramID),
 		},
-		data,
+		instructionData,
 	), nil
 }
 
@@ -169,132 +227,5 @@ func BuildRefundInstruction(
 			solana.Meta(owner).WRITE().SIGNER(),
 		},
 		RefundDisc[:],
-	), nil
-}
-
-// BuildCreateDirectFixedInstruction builds DirectFixed envelope
-func BuildCreateDirectFixedInstruction(
-	programID solana.PublicKey,
-	user solana.PublicKey,
-	envelopeID uint64,
-	allowedAddress string,
-	amount uint64,
-	expiryHours uint64,
-) (solana.Instruction, error) {
-	// Derive PDAs
-	userState, _, _ := DeriveUserStatePDA(programID, user)
-	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
-
-	// Parse allowed address
-	allowedPubkey := solana.MustPublicKeyFromBase58(allowedAddress)
-
-	// Build instruction data
-	// Format: discriminator(8) + variant(1) + allowed_address(32) + amount(8) + expiry(8)
-	data := make([]byte, 0, 64)
-	data = append(data, CreateDisc[:]...)         // discriminator (8 bytes)
-	data = append(data, 0)                        // variant 0 = DirectFixed
-	data = append(data, allowedPubkey.Bytes()...) // allowed_address (32 bytes)
-
-	amountBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(amountBytes, amount)
-	data = append(data, amountBytes...) // amount (8 bytes)
-
-	expiryBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
-	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
-
-	return solana.NewInstruction(
-		programID,
-		solana.AccountMetaSlice{
-			solana.Meta(userState).WRITE(),
-			solana.Meta(envelope).WRITE(),
-			solana.Meta(user).WRITE().SIGNER(),
-			solana.Meta(solana.SystemProgramID),
-		},
-		data,
-	), nil
-}
-
-// BuildCreateGroupFixedInstruction builds GroupFixed envelope
-func BuildCreateGroupFixedInstruction(
-	programID solana.PublicKey,
-	user solana.PublicKey,
-	envelopeID uint64,
-	totalUsers uint64,
-	amountPerUser uint64,
-	expiryHours uint64,
-) (solana.Instruction, error) {
-	userState, _, _ := DeriveUserStatePDA(programID, user)
-	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
-
-	// Build instruction data
-	// Format: discriminator(8) + variant(1) + total_users(8) + amount_per_user(8) + expiry(8)
-	data := make([]byte, 0, 40)
-	data = append(data, CreateDisc[:]...) // discriminator (8 bytes)
-	data = append(data, 1)                // variant 1 = GroupFixed
-
-	totalUsersBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(totalUsersBytes, totalUsers)
-	data = append(data, totalUsersBytes...) // total_users (8 bytes)
-
-	amountPerUserBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(amountPerUserBytes, amountPerUser)
-	data = append(data, amountPerUserBytes...) // amount_per_user (8 bytes)
-
-	expiryBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
-	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
-
-	return solana.NewInstruction(
-		programID,
-		solana.AccountMetaSlice{
-			solana.Meta(userState).WRITE(),
-			solana.Meta(envelope).WRITE(),
-			solana.Meta(user).WRITE().SIGNER(),
-			solana.Meta(solana.SystemProgramID),
-		},
-		data,
-	), nil
-}
-
-// BuildCreateGroupRandomInstruction builds GroupRandom envelope
-func BuildCreateGroupRandomInstruction(
-	programID solana.PublicKey,
-	user solana.PublicKey,
-	envelopeID uint64,
-	totalAmount uint64,
-	maxClaimers uint64,
-	expiryHours uint64,
-) (solana.Instruction, error) {
-	userState, _, _ := DeriveUserStatePDA(programID, user)
-	envelope, _, _ := DeriveEnvelopePDA(programID, user, envelopeID)
-
-	// Build instruction data
-	// Format: discriminator(8) + variant(1) + total_amount(8) + max_claimers(8) + expiry(8)
-	data := make([]byte, 0, 40)
-	data = append(data, CreateDisc[:]...) // discriminator (8 bytes)
-	data = append(data, 2)                // variant 2 = GroupRandom
-
-	totalAmountBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(totalAmountBytes, totalAmount)
-	data = append(data, totalAmountBytes...) // total_amount (8 bytes)
-
-	maxClaimersBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(maxClaimersBytes, maxClaimers)
-	data = append(data, maxClaimersBytes...) // max_claimers (8 bytes)
-
-	expiryBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(expiryBytes, expiryHours)
-	data = append(data, expiryBytes...) // expiry_hours (8 bytes)
-
-	return solana.NewInstruction(
-		programID,
-		solana.AccountMetaSlice{
-			solana.Meta(userState).WRITE(),
-			solana.Meta(envelope).WRITE(),
-			solana.Meta(user).WRITE().SIGNER(),
-			solana.Meta(solana.SystemProgramID),
-		},
-		data,
 	), nil
 }
