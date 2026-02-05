@@ -1,12 +1,12 @@
 package main
 
 import (
+	"github.com/gagliardetto/solana-go/rpc"
 	"log"
 	"net/http"
 	"os"
 
 	"blockchain/solprogram"
-	"github.com/gagliardetto/solana-go/rpc"
 )
 
 func main() {
