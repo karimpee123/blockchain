@@ -10,25 +10,53 @@ import (
 	"time"
 )
 
+const (
+	NetSOL = "solana"
+	NetBSC = "bsc"
+
+	ActionCreate = "create"
+	ActionClaim  = "claim"
+	ActionRefund = "refund"
+)
+
 var (
+	network             Network
 	userA, userB, userC User
 	httpClient          = &http.Client{Timeout: 10 * time.Second}
 	baseURL             = "http://localhost:10011"
 )
 
+func initAll(chain string) {
+	initUser()
+	initNetwork(chain)
+}
+
+func initNetwork(chain string) {
+	switch chain {
+	case NetSOL:
+		network = Network{Name: "solana", Symbol: "SOL"}
+	case NetBSC:
+		network = Network{Name: "bsc", Symbol: "BNB"}
+	}
+
+}
+
 func initUser() {
 	userA = User{
 		ID:         "7237260465",
+		Address:    "3YkzQC2PwFGvJr2GS7FDBopvG5tda4eXdq5pmwEbWeyd",
 		PrivateKey: "HheE1MM3ciGE5hBzbfXNNeW4W4QatfAkBZgee962CWENsQrWWagNemxb8hreYnxZa2AmS1fx9MSYnbKCXGDzemV",
 		Token:      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVc2VySUQiOiI3MjM3MjYwNDY1IiwiVXNlclR5cGUiOjEsIlBsYXRmb3JtSUQiOjAsImV4cCI6MTc3NzE4Mzk4MSwibmJmIjoxNzY5NDA3OTIxLCJpYXQiOjE3Njk0MDc5ODF9.JzRkA0grclslhxQTGVAiqKIzzfwFmg_KdHs-RluMwpM",
 	}
 	userB = User{
 		ID:         "4138007321",
+		Address:    "wFuFPgHsLt9t5HALqFQqbdM9WvyQstdKN8NQXB3GWeD",
 		PrivateKey: "3YMrwyXU2hNKDrUbxUUTBTr8HTSjLAiafWmGsmnUAVg8mMnH4osbPKEqiwkP2npstDA8uRzpUbDG1EZC2Pyvcur9",
 		Token:      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVc2VySUQiOiI0MTM4MDA3MzIxIiwiVXNlclR5cGUiOjEsIlBsYXRmb3JtSUQiOjAsImV4cCI6MTc3Nzk3MTYxMCwibmJmIjoxNzcwMTk1NTUwLCJpYXQiOjE3NzAxOTU2MTB9.FpIijKiwH3EcDT_pD0G6zFi3MhIW7bV9Nsscb0BPMlA",
 	}
 	userC = User{
 		ID:         "5834654941",
+		Address:    "9fru5gQYKd8PMS1qztZ9zLdTvVRQ11eF87PZYVUYVQsx",
 		PrivateKey: "4MbCTDNAszFXV2ZUnkPni7oQJRs7DxbyJkGvfY2YNdtJcyG8QkXuW4MET62NQBNebMRqNVuTbuew3N1BoKs2ppn",
 		Token:      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVc2VySUQiOiI3MjM3MjYwNDY1IiwiVXNlclR5cGUiOjEsIlBsYXRmb3JtSUQiOjAsImV4cCI6MTc3NzE4Mzk4MSwibmJmIjoxNzY5NDA3OTIxLCJpYXQiOjE3Njk0MDc5ODF9.JzRkA0grclslhxQTGVAiqKIzzfwFmg_KdHs-RluMwpM",
 	}

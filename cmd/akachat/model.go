@@ -2,6 +2,7 @@ package main
 
 type User struct {
 	ID         string `json:"id"`
+	Address    string `json:"address"`
 	Token      string `json:"token"`
 	PrivateKey string `json:"privateKey"`
 }
@@ -60,6 +61,7 @@ type SignedTxResult struct {
 	ContractAddress   string      `json:"contractAddress"`
 	Logs              interface{} `json:"logs"`
 	EnvelopeID        int64       `json:"envelopeId"`
+	TransferID        int64       `json:"transfer_id"`
 }
 
 type PayloadCreate struct {
@@ -86,10 +88,38 @@ type PayloadClaim struct {
 	Status         string `json:"status"`
 }
 
+type PayloadRefund struct {
+	UserID          string `json:"userID"`
+	EnvelopeID      int    `json:"envelopeID"`
+	AddressUser     string `json:"addressUser"`
+	Chain           string `json:"chain"`
+	EnvelopeChainID int    `json:"envelopeChainID"`
+}
+
 type PayloadSignedTx struct {
 	RawTransaction string `json:"rawTransaction"`
 	TxHash         string `json:"txHash"`
 	Chain          string `json:"chain"`
 	CacheKey       string `json:"cacheKey"`
 	Action         string `json:"action"`
+}
+
+type PayloadTransferCreate struct {
+	Token    string `json:"token"`
+	Amount   int    `json:"Amount"`
+	Value    int    `json:"value"`
+	Chain    string `json:"chain"`
+	Remarks  string `json:"remarks"`
+	Expiry   int    `json:"expiry"`
+	ToUserID string `json:"toUserID"`
+}
+
+type PayloadTransferClaim struct {
+	Chain      string `json:"chain"`
+	TransferID int    `json:"transferId"`
+}
+
+type Network struct {
+	Name   string `json:"name"`
+	Symbol string `json:"symbol"`
 }
