@@ -116,7 +116,7 @@ func BuildCreateEnvelopeInstruction(
 	var envelopeTypeData []byte
 
 	switch envelopeType {
-	case EnvelopeTypeDirectFixed:
+	case RequestTypeDirectFixed:
 		if allowedAddress == nil {
 			return nil, fmt.Errorf("allowed_address required for DirectFixed")
 		}
@@ -127,10 +127,10 @@ func BuildCreateEnvelopeInstruction(
 		envelopeTypeData[0] = 0 // DirectFixed = variant 0
 		copy(envelopeTypeData[1:33], allowedPubkey.Bytes())
 
-	case EnvelopeTypeGroupFixed:
+	case RequestTypeGroupFixed:
 		envelopeTypeData = []byte{1} // GroupFixed = variant 1
 
-	case EnvelopeTypeGroupRandom:
+	case RequestTypeGroupRandom:
 		envelopeTypeData = []byte{2} // GroupRandom = variant 2
 
 	default:

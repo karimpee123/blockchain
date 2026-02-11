@@ -15,9 +15,9 @@ import (
 type EnvelopeTypeRequest string
 
 const (
-	EnvelopeTypeDirectFixed EnvelopeTypeRequest = "direct_fixed"
-	EnvelopeTypeGroupFixed  EnvelopeTypeRequest = "group_fixed"
-	EnvelopeTypeGroupRandom EnvelopeTypeRequest = "group_random"
+	RequestTypeDirectFixed EnvelopeTypeRequest = "direct_fixed"
+	RequestTypeGroupFixed  EnvelopeTypeRequest = "group_fixed"
+	RequestTypeGroupRandom EnvelopeTypeRequest = "group_random"
 )
 
 // CreateEnvelopeRequest with envelope types
@@ -94,7 +94,7 @@ func (c *Client) HandleCreateEnvelope(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate DirectFixed
-	if req.EnvelopeType == EnvelopeTypeDirectFixed {
+	if req.EnvelopeType == RequestTypeDirectFixed {
 		if req.AllowedAddress == nil || *req.AllowedAddress == "" {
 			json.NewEncoder(w).Encode(Response{
 				Success: false,
@@ -147,36 +147,36 @@ func (c *Client) HandleCreateEnvelope(w http.ResponseWriter, r *http.Request) {
 	var createInstruction solana.Instruction
 
 	switch req.EnvelopeType {
-	case EnvelopeTypeDirectFixed:
+	case RequestTypeDirectFixed:
 		createInstruction, err = BuildCreateEnvelopeInstruction(
 			c.ProgramID,
 			user,
 			nextEnvelopeID,
-			EnvelopeTypeDirectFixed,
+			RequestTypeDirectFixed,
 			req.TotalAmount,
 			req.TotalUsers,
 			req.ExpiryHours,
 			req.AllowedAddress, // Only for DirectFixed
 		)
 
-	case EnvelopeTypeGroupFixed:
+	case RequestTypeGroupFixed:
 		createInstruction, err = BuildCreateEnvelopeInstruction(
 			c.ProgramID,
 			user,
 			nextEnvelopeID,
-			EnvelopeTypeGroupFixed,
+			RequestTypeGroupFixed,
 			req.TotalAmount,
 			req.TotalUsers,
 			req.ExpiryHours,
 			nil, // No allowed_address
 		)
 
-	case EnvelopeTypeGroupRandom:
+	case RequestTypeGroupRandom:
 		createInstruction, err = BuildCreateEnvelopeInstruction(
 			c.ProgramID,
 			user,
 			nextEnvelopeID,
-			EnvelopeTypeGroupRandom,
+			RequestTypeGroupRandom,
 			req.TotalAmount,
 			req.TotalUsers,
 			req.ExpiryHours,
