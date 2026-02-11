@@ -2,23 +2,35 @@ package solprogram
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"time"
 
+	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+	confirm "github.com/gagliardetto/solana-go/rpc/sendAndConfirmTransaction"
+	"github.com/gagliardetto/solana-go/rpc/ws"
 )
 
 // USDCEnvelopeClient - Client untuk interact dengan USDC envelope program
 type USDCEnvelopeClient struct {
 	rpcClient *rpc.Client
+	wsClient  *ws.Client
 	programID solana.PublicKey
 	usdcMint  solana.PublicKey
 	network   string // "devnet", "mainnet", "localhost"
 }
 
 // NewUSDCEnvelopeClient - Create new USDC envelope client
-func NewUSDCEnvelopeClient(rpcURL string, network string) (*USDCEnvelopeClient, error) {
+func NewUSDCEnvelopeClient(rpcURL string, wsURL string, network string) (*USDCEnvelopeClient, error) {
 	client := rpc.New(rpcURL)
+
+	// Connect to WebSocket for transaction confirmation
+	wsClient, err := ws.Connect(context.Background(), wsURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to websocket: %w", err)
+	}
 
 	programID, err := solana.PublicKeyFromBase58(USDCProgramID)
 	if err != nil {
@@ -40,6 +52,7 @@ func NewUSDCEnvelopeClient(rpcURL string, network string) (*USDCEnvelopeClient, 
 
 	return &USDCEnvelopeClient{
 		rpcClient: client,
+		wsClient:  wsClient,
 		programID: programID,
 		usdcMint:  usdcMint,
 		network:   network,
@@ -260,4 +273,251 @@ func uint64ToBytes(n uint64) []byte {
 	b[6] = byte(n >> 48)
 	b[7] = byte(n >> 56)
 	return b
+}
+
+// =========================
+// UNSIGNED TRANSACTION FUNCTIONS
+// =========================
+
+// UnsignedTransactionResponse - Response for unsigned transaction
+type UnsignedTransactionResponse struct {
+	TransactionID       string `json:"transaction_id"`
+	UnsignedTransaction string `json:"unsigned_transaction"` // base64 encoded
+	RecentBlockhash     string `json:"recent_blockhash"`
+	Message             string `json:"message,omitempty"`
+}
+
+// SignedTransactionRequest - Request to send signed transaction
+type SignedTransactionRequest struct {
+	TransactionID     string `json:"transaction_id"`
+	SignedTransaction string `json:"signed_transaction"` // base64 encoded
+}
+
+// GenerateUnsignedInitUserState - Generate unsigned transaction for init_user_state
+func (c *USDCEnvelopeClient) GenerateUnsignedInitUserState(user solana.PublicKey) (*UnsignedTransactionResponse, error) {
+	// Build instruction
+	instruction, err := c.BuildInitUserStateInstruction(user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build instruction: %w", err)
+	}
+
+	// Get recent blockhash
+	ctx := context.Background()
+	recent, err := c.rpcClient.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent blockhash: %w", err)
+	}
+
+	// Build transaction WITHOUT signatures
+	tx, err := solana.NewTransaction(
+		[]solana.Instruction{instruction},
+		recent.Value.Blockhash,
+		solana.TransactionPayer(user),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction: %w", err)
+	}
+
+	// Serialize transaction
+	txBytes, err := tx.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+	}
+
+	transactionID := fmt.Sprintf("usdc_init_%d", time.Now().UnixNano())
+
+	return &UnsignedTransactionResponse{
+		TransactionID:       transactionID,
+		UnsignedTransaction: base64.StdEncoding.EncodeToString(txBytes),
+		RecentBlockhash:     recent.Value.Blockhash.String(),
+		Message:             "Transaction ready to be signed by user",
+	}, nil
+}
+
+// GenerateUnsignedCreateEnvelope - Generate unsigned transaction for create envelope
+func (c *USDCEnvelopeClient) GenerateUnsignedCreateEnvelope(
+	user solana.PublicKey,
+	userTokenAccount solana.PublicKey,
+	params CreateEnvelopeParams,
+	nextEnvelopeID uint64,
+) (*UnsignedTransactionResponse, error) {
+	// Build instruction
+	instruction, err := c.BuildCreateEnvelopeInstruction(user, userTokenAccount, params, nextEnvelopeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build instruction: %w", err)
+	}
+
+	// Get recent blockhash
+	ctx := context.Background()
+	recent, err := c.rpcClient.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent blockhash: %w", err)
+	}
+
+	// Build transaction WITHOUT signatures
+	tx, err := solana.NewTransaction(
+		[]solana.Instruction{instruction},
+		recent.Value.Blockhash,
+		solana.TransactionPayer(user),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction: %w", err)
+	}
+
+	// Serialize transaction
+	txBytes, err := tx.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+	}
+
+	transactionID := fmt.Sprintf("usdc_create_%d", time.Now().UnixNano())
+
+	return &UnsignedTransactionResponse{
+		TransactionID:       transactionID,
+		UnsignedTransaction: base64.StdEncoding.EncodeToString(txBytes),
+		RecentBlockhash:     recent.Value.Blockhash.String(),
+		Message:             "Transaction ready to be signed by user",
+	}, nil
+}
+
+// GenerateUnsignedClaim - Generate unsigned transaction for claim
+func (c *USDCEnvelopeClient) GenerateUnsignedClaim(
+	params ClaimEnvelopeParams,
+) (*UnsignedTransactionResponse, error) {
+	// Build instruction
+	instruction, err := c.BuildClaimInstruction(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build instruction: %w", err)
+	}
+
+	// Get recent blockhash
+	ctx := context.Background()
+	recent, err := c.rpcClient.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent blockhash: %w", err)
+	}
+
+	// Build transaction WITHOUT signatures
+	tx, err := solana.NewTransaction(
+		[]solana.Instruction{instruction},
+		recent.Value.Blockhash,
+		solana.TransactionPayer(params.Claimer),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction: %w", err)
+	}
+
+	// Serialize transaction
+	txBytes, err := tx.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+	}
+
+	transactionID := fmt.Sprintf("usdc_claim_%d", time.Now().UnixNano())
+
+	return &UnsignedTransactionResponse{
+		TransactionID:       transactionID,
+		UnsignedTransaction: base64.StdEncoding.EncodeToString(txBytes),
+		RecentBlockhash:     recent.Value.Blockhash.String(),
+		Message:             "Transaction ready to be signed by user",
+	}, nil
+}
+
+// GenerateUnsignedRefund - Generate unsigned transaction for refund
+func (c *USDCEnvelopeClient) GenerateUnsignedRefund(
+	params RefundParams,
+) (*UnsignedTransactionResponse, error) {
+	// Build instruction
+	instruction, err := c.BuildRefundInstruction(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build instruction: %w", err)
+	}
+
+	// Get recent blockhash
+	ctx := context.Background()
+	recent, err := c.rpcClient.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent blockhash: %w", err)
+	}
+
+	// Build transaction WITHOUT signatures
+	tx, err := solana.NewTransaction(
+		[]solana.Instruction{instruction},
+		recent.Value.Blockhash,
+		solana.TransactionPayer(params.Owner),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction: %w", err)
+	}
+
+	// Serialize transaction
+	txBytes, err := tx.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+	}
+
+	transactionID := fmt.Sprintf("usdc_refund_%d", time.Now().UnixNano())
+
+	return &UnsignedTransactionResponse{
+		TransactionID:       transactionID,
+		UnsignedTransaction: base64.StdEncoding.EncodeToString(txBytes),
+		RecentBlockhash:     recent.Value.Blockhash.String(),
+		Message:             "Transaction ready to be signed by user",
+	}, nil
+}
+
+// SubmitSignedTransaction - Send signed transaction to blockchain
+// Note: This is a convenience wrapper for unsigned transaction flow
+func (c *USDCEnvelopeClient) SubmitSignedTransaction(req SignedTransactionRequest) (*TransactionResult, error) {
+	// Decode signed transaction
+	txBytes, err := base64.StdEncoding.DecodeString(req.SignedTransaction)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode signed transaction: %w", err)
+	}
+
+	// Unmarshal transaction
+	decoder := bin.NewBinDecoder(txBytes)
+	var tx solana.Transaction
+	if err := tx.UnmarshalWithDecoder(decoder); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal transaction: %w", err)
+	}
+
+	// Validate transaction has signature
+	if len(tx.Signatures) == 0 {
+		return nil, fmt.Errorf("transaction is not signed")
+	}
+
+	// Send transaction to Solana
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sig, err := confirm.SendAndConfirmTransaction(
+		ctx,
+		c.rpcClient,
+		c.wsClient,
+		&tx,
+	)
+
+	if err != nil {
+		return &TransactionResult{
+			Signature:   "",
+			Status:      StatusFailed,
+			Error:       stringPtr(fmt.Sprintf("Failed to send transaction: %v", err)),
+			ExplorerURL: "",
+		}, err
+	}
+
+	signature := sig.String()
+
+	return &TransactionResult{
+		Signature:   signature,
+		Status:      StatusFinalized,
+		Error:       nil,
+		ExplorerURL: c.getExplorerURL(signature),
+	}, nil
+}
+
+// stringPtr - helper to get string pointer
+func stringPtr(s string) *string {
+	return &s
 }

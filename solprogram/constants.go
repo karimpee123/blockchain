@@ -60,3 +60,10 @@ const (
 	RPCURLMainnet   = "https://api.mainnet-beta.solana.com"
 	RPCURLLocalhost = "http://localhost:8899"
 )
+
+// WebSocket URLs
+const (
+	WSURLDevnet    = "wss://api.devnet.solana.com"
+	WSURLMainnet   = "wss://api.mainnet-beta.solana.com"
+	WSURLLocalhost = "ws://localhost:8900"
+)

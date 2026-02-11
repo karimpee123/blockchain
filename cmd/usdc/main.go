@@ -3,11 +3,13 @@ package main
 import (
 	"blockchain/solprogram"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
+	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
 )
 
@@ -34,13 +36,22 @@ func main() {
 	// Run ONE test at a time to avoid state conflicts
 	// =====================================================
 	const (
-		runInitUserState   = true  // Initialize user state (required first time)
+		runInitUserState   = false // Initialize user state (required first time)
 		runGroupFixed      = false // Create GroupFixed envelope (multiple claimers)
-		runDirectFixed     = true  // Create DirectFixed envelope (single claimer)
-		runGetEnvelopeInfo = true  // Get envelope info (requires envelope created)
+		runDirectFixed     = false // Create DirectFixed envelope (single claimer)
+		runGetEnvelopeInfo = false // Get envelope info (requires envelope created)
 		runClaim           = false // Claim envelope (requires User2 ATA + envelope exists)
-		runWaitAndRefund   = true  // Wait for expiry then refund
-		runCheckTxStatus   = true  // Check transaction status
+		runWaitAndRefund   = false // Wait for expiry then refund
+		runCheckTxStatus   = false // Check transaction status
+
+		// NEW: Unsigned Transaction Demos
+		runUnsignedInit   = false // Demo: Generate unsigned init_user_state transaction
+		runUnsignedCreate = false // Demo: Generate unsigned create_envelope transaction
+		runUnsignedClaim  = false // Demo: Generate unsigned claim transaction
+		runUnsignedRefund = false // Demo: Generate unsigned refund transaction (after expiry)
+
+		// Complete Flow Demo (create -> claim -> refund)
+		runCompleteFlow = true // Demo: Complete unsigned transaction flow (create -> wait 2-3s -> claim -> wait 60s -> refund)
 	)
 
 	// Setup
@@ -49,6 +60,7 @@ func main() {
 	// Create client (Devnet)
 	client, err := solprogram.NewUSDCEnvelopeClient(
 		solprogram.RPCURLDevnet,
+		solprogram.WSURLDevnet,
 		"devnet",
 	)
 	if err != nil {
@@ -154,6 +166,51 @@ func main() {
 		} else {
 			fmt.Println("⚠️  Skipped: No transaction signature available. Create an envelope first!")
 		}
+	}
+
+	// =========================
+	// UNSIGNED TRANSACTION DEMOS
+	// =========================
+
+	// Example 8: Unsigned Init User State
+	if runUnsignedInit {
+		fmt.Println("\n--- Example 8: Unsigned Transaction - Init User State ---")
+		demonstrateUnsignedInitUserState(ctx, client)
+	}
+
+	// Example 9: Unsigned Create Envelope
+	var unsignedEnvelopeID uint64
+	if runUnsignedCreate {
+		fmt.Println("\n--- Example 9: Unsigned Transaction - Create Envelope ---")
+		unsignedEnvelopeID = demonstrateUnsignedCreateEnvelope(ctx, client)
+	}
+
+	// Example 10: Unsigned Claim
+	if runUnsignedClaim {
+		fmt.Println("\n--- Example 10: Unsigned Transaction - Claim ---")
+		if unsignedEnvelopeID == 0 {
+			log.Fatal("❌ Error: No envelope created via unsigned transaction. Set runUnsignedCreate=true first!")
+		}
+		fmt.Println("Waiting 5 seconds for envelope to be confirmed...")
+		time.Sleep(5 * time.Second)
+		demonstrateUnsignedClaim(ctx, client, unsignedEnvelopeID)
+	}
+
+	// Example 11: Unsigned Refund (after expiry)
+	if runUnsignedRefund {
+		fmt.Println("\n--- Example 11: Unsigned Transaction - Refund ---")
+		if unsignedEnvelopeID == 0 {
+			log.Fatal("❌ Error: No envelope created via unsigned transaction. Set runUnsignedCreate=true first!")
+		}
+		fmt.Println("Waiting 65 seconds for envelope to expire (60 seconds + buffer)...")
+		time.Sleep(65 * time.Second)
+		demonstrateUnsignedRefund(ctx, client, unsignedEnvelopeID)
+	}
+
+	// Example 12: Complete Flow Demo
+	if runCompleteFlow {
+		fmt.Println("\n--- Example 12: Complete Unsigned Transaction Flow ---")
+		demonstrateCompleteFlow(ctx, client)
 	}
 
 	fmt.Println("\n=== Demo Complete ===")
@@ -477,4 +534,540 @@ func demonstrateTransactionStatus(ctx context.Context, client *solprogram.USDCEn
 	case solprogram.StatusFailed:
 		fmt.Println("  ❌ Transaction failed")
 	}
+}
+
+// =========================
+// UNSIGNED TRANSACTION DEMOS
+// =========================
+
+// demonstrateUnsignedInitUserState - Example: Generate unsigned transaction for init user state
+func demonstrateUnsignedInitUserState(ctx context.Context, client *solprogram.USDCEnvelopeClient) {
+	fmt.Println("Generating unsigned transaction for init user state...")
+	fmt.Printf("User: %s\n", User1PublicKey.String())
+
+	// Step 1: Backend generates unsigned transaction
+	response, err := client.GenerateUnsignedInitUserState(User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error generating unsigned transaction: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Unsigned transaction generated!\n")
+	fmt.Printf("Transaction ID: %s\n", response.TransactionID)
+	fmt.Printf("Recent Blockhash: %s\n", response.RecentBlockhash)
+	fmt.Printf("Unsigned Transaction (base64): %s...\n", response.UnsignedTransaction[:50])
+	fmt.Printf("\n📤 Next step: Frontend will sign this transaction with user's private key\n")
+	fmt.Printf("📥 Then: Submit signed transaction back to backend via SubmitSignedTransaction()\n")
+
+	// Step 2: Frontend signs transaction (simulated here for demo)
+	fmt.Println("\n--- Simulating Frontend Signing (FOR DEMO ONLY) ---")
+	signedTx, err := signTransactionDemo(response.UnsignedTransaction, User1PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error signing: %v\n", err)
+		return
+	}
+
+	// Step 3: Backend submits signed transaction
+	fmt.Println("\n--- Submitting Signed Transaction ---")
+	signedReq := solprogram.SignedTransactionRequest{
+		TransactionID:     response.TransactionID,
+		SignedTransaction: signedTx,
+	}
+
+	result, err := client.SubmitSignedTransaction(signedReq)
+	if err != nil {
+		fmt.Printf("❌ Error submitting: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Transaction submitted!\n")
+	fmt.Printf("Signature: %s\n", result.Signature)
+	fmt.Printf("Status: %s\n", result.Status)
+	fmt.Printf("Explorer: %s\n", result.ExplorerURL)
+}
+
+// demonstrateUnsignedCreateEnvelope - Example: Generate unsigned transaction for create envelope
+func demonstrateUnsignedCreateEnvelope(ctx context.Context, client *solprogram.USDCEnvelopeClient) uint64 {
+	fmt.Println("Generating unsigned transaction for create envelope...")
+
+	// Get user state
+	userState, err := client.GetUserState(ctx, User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error getting user state: %v\n", err)
+		fmt.Println("Run init_user_state first!")
+		return 0
+	}
+
+	nextEnvelopeID := userState.LastEnvelopeID + 1
+
+	// Get user's USDC token account
+	userTokenAccount, err := client.GetUSDCTokenAddress(User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error deriving token account: %v\n", err)
+		return 0
+	}
+
+	// Create params for DirectFixed envelope
+	params := solprogram.CreateEnvelopeParams{
+		EnvelopeType: solprogram.EnvelopeTypeData{
+			Type:           solprogram.EnvelopeTypeDirectFixed,
+			AllowedAddress: &User2PublicKey,
+		},
+		TotalAmount:   1_000_000, // 1 USDC (6 decimals)
+		TotalUsers:    1,
+		ExpirySeconds: 60, // 60 seconds
+	}
+
+	fmt.Printf("  Next Envelope ID: %d\n", nextEnvelopeID)
+	fmt.Printf("  Type: DirectFixed\n")
+	fmt.Printf("  Allowed Address: %s\n", User2PublicKey.String())
+	fmt.Printf("  Amount: %d (1 USDC)\n", params.TotalAmount)
+	fmt.Printf("  Expiry: %d seconds\n", params.ExpirySeconds)
+
+	// Step 1: Backend generates unsigned transaction
+	response, err := client.GenerateUnsignedCreateEnvelope(
+		User1PublicKey,
+		userTokenAccount,
+		params,
+		nextEnvelopeID,
+	)
+	if err != nil {
+		fmt.Printf("❌ Error generating unsigned transaction: %v\n", err)
+		return 0
+	}
+
+	fmt.Printf("\n✅ Unsigned transaction generated!\n")
+	fmt.Printf("Transaction ID: %s\n", response.TransactionID)
+	fmt.Printf("Unsigned Transaction (base64): %s...\n", response.UnsignedTransaction[:50])
+
+	// Step 2: Simulate signing
+	fmt.Println("\n--- Simulating Frontend Signing ---")
+	signedTx, err := signTransactionDemo(response.UnsignedTransaction, User1PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error signing: %v\n", err)
+		return 0
+	}
+
+	// Step 3: Submit signed transaction
+	fmt.Println("\n--- Submitting Signed Transaction ---")
+	signedReq := solprogram.SignedTransactionRequest{
+		TransactionID:     response.TransactionID,
+		SignedTransaction: signedTx,
+	}
+
+	result, err := client.SubmitSignedTransaction(signedReq)
+	if err != nil {
+		fmt.Printf("❌ Error submitting: %v\n", err)
+		return 0
+	}
+
+	fmt.Printf("\n✅ Envelope created!\n")
+	fmt.Printf("Envelope ID: %d\n", nextEnvelopeID)
+	fmt.Printf("Signature: %s\n", result.Signature)
+	fmt.Printf("Explorer: %s\n", result.ExplorerURL)
+
+	return nextEnvelopeID
+}
+
+// demonstrateUnsignedClaim - Example: Generate unsigned transaction for claim
+func demonstrateUnsignedClaim(ctx context.Context, client *solprogram.USDCEnvelopeClient, envelopeID uint64) {
+	fmt.Println("Generating unsigned transaction for claim...")
+	fmt.Printf("Envelope ID: %d\n", envelopeID)
+	fmt.Printf("Claimer: %s\n", User2PublicKey.String())
+
+	// Get claimer's USDC token account
+	claimerTokenAccount, err := client.GetUSDCTokenAddress(User2PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error deriving token account: %v\n", err)
+		return
+	}
+
+	params := solprogram.ClaimEnvelopeParams{
+		Owner:               User1PublicKey,
+		EnvelopeID:          envelopeID,
+		Claimer:             User2PublicKey,
+		ClaimerTokenAccount: claimerTokenAccount,
+	}
+
+	// Step 1: Backend generates unsigned transaction
+	response, err := client.GenerateUnsignedClaim(params)
+	if err != nil {
+		fmt.Printf("❌ Error generating unsigned transaction: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Unsigned transaction generated!\n")
+	fmt.Printf("Transaction ID: %s\n", response.TransactionID)
+
+	// Step 2: Simulate signing by User2
+	fmt.Println("\n--- Simulating Frontend Signing (User2) ---")
+	signedTx, err := signTransactionDemo(response.UnsignedTransaction, User2PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error signing: %v\n", err)
+		return
+	}
+
+	// Step 3: Submit signed transaction
+	fmt.Println("\n--- Submitting Signed Transaction ---")
+	signedReq := solprogram.SignedTransactionRequest{
+		TransactionID:     response.TransactionID,
+		SignedTransaction: signedTx,
+	}
+
+	result, err := client.SubmitSignedTransaction(signedReq)
+	if err != nil {
+		fmt.Printf("❌ Error submitting: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Claim successful!\n")
+	fmt.Printf("Signature: %s\n", result.Signature)
+	fmt.Printf("Explorer: %s\n", result.ExplorerURL)
+}
+
+// demonstrateUnsignedRefund - Example: Generate unsigned transaction for refund
+func demonstrateUnsignedRefund(ctx context.Context, client *solprogram.USDCEnvelopeClient, envelopeID uint64) {
+	fmt.Println("Generating unsigned transaction for refund...")
+	fmt.Printf("Envelope ID: %d\n", envelopeID)
+
+	// Get owner's USDC token account
+	ownerTokenAccount, err := client.GetUSDCTokenAddress(User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error deriving token account: %v\n", err)
+		return
+	}
+
+	params := solprogram.RefundParams{
+		Owner:             User1PublicKey,
+		EnvelopeID:        envelopeID,
+		OwnerTokenAccount: ownerTokenAccount,
+	}
+
+	// Step 1: Backend generates unsigned transaction
+	response, err := client.GenerateUnsignedRefund(params)
+	if err != nil {
+		fmt.Printf("❌ Error generating unsigned transaction: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Unsigned transaction generated!\n")
+	fmt.Printf("Transaction ID: %s\n", response.TransactionID)
+
+	// Step 2: Simulate signing
+	fmt.Println("\n--- Simulating Frontend Signing ---")
+	signedTx, err := signTransactionDemo(response.UnsignedTransaction, User1PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error signing: %v\n", err)
+		return
+	}
+
+	// Step 3: Submit signed transaction
+	fmt.Println("\n--- Submitting Signed Transaction ---")
+	signedReq := solprogram.SignedTransactionRequest{
+		TransactionID:     response.TransactionID,
+		SignedTransaction: signedTx,
+	}
+
+	result, err := client.SubmitSignedTransaction(signedReq)
+	if err != nil {
+		fmt.Printf("❌ Error submitting: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Refund successful!\n")
+	fmt.Printf("Signature: %s\n", result.Signature)
+	fmt.Printf("Explorer: %s\n", result.ExplorerURL)
+}
+
+// demonstrateCompleteFlow - Complete flow: create -> wait -> claim -> wait -> refund
+func demonstrateCompleteFlow(ctx context.Context, client *solprogram.USDCEnvelopeClient) {
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("🚀 COMPLETE UNSIGNED TRANSACTION FLOW DEMONSTRATION")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("Flow: Create Envelope → Wait 2-3s → Claim → Wait 60s → Refund")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+	// ========================================
+	// STEP 1: Create Envelope (Unsigned Transaction)
+	// ========================================
+	fmt.Println("╔════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  STEP 1: CREATE ENVELOPE (Unsigned Transaction Pattern)   ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════╝")
+
+	// Get user state
+	userState, err := client.GetUserState(ctx, User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error getting user state: %v\n", err)
+		fmt.Println("\n💡 TIP: Run with runInitUserState=true first to initialize user state")
+		return
+	}
+
+	envelopeID := userState.LastEnvelopeID + 1
+
+	// Get user's USDC token account
+	userTokenAccount, err := client.GetUSDCTokenAddress(User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error deriving token account: %v\n", err)
+		return
+	}
+
+	// Create params for GroupFixed envelope (anyone can claim, up to 3 users)
+	params := solprogram.CreateEnvelopeParams{
+		EnvelopeType: solprogram.EnvelopeTypeData{
+			Type:           solprogram.EnvelopeTypeGroupFixed,
+			AllowedAddress: nil, // Anyone can claim
+		},
+		TotalAmount:   3_000_000, // 3 USDC total (6 decimals)
+		TotalUsers:    3,         // Max 3 claimers, each gets 1 USDC
+		ExpirySeconds: 60,        // 60 seconds
+	}
+
+	fmt.Printf("📋 Envelope Configuration:\n")
+	fmt.Printf("   Envelope ID: %d\n", envelopeID)
+	fmt.Printf("   Type: GroupFixed\n")
+	fmt.Printf("   Owner: %s\n", User1PublicKey.String())
+	fmt.Printf("   Total Users: %d (Anyone can claim)\n", params.TotalUsers)
+	fmt.Printf("   Total Amount: %.2f USDC\n", float64(params.TotalAmount)/1_000_000)
+	fmt.Printf("   Amount per User: %.2f USDC\n", float64(params.TotalAmount)/float64(params.TotalUsers)/1_000_000)
+	fmt.Printf("   Expiry: %d seconds\n\n", params.ExpirySeconds)
+
+	// Generate unsigned transaction (backend)
+	fmt.Println("🔧 Backend: Generating unsigned transaction...")
+	unsignedResp, err := client.GenerateUnsignedCreateEnvelope(
+		User1PublicKey,
+		userTokenAccount,
+		params,
+		envelopeID,
+	)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Unsigned transaction generated\n")
+	fmt.Printf("   Transaction ID: %s\n", unsignedResp.TransactionID)
+	fmt.Printf("   Recent Blockhash: %s\n\n", unsignedResp.RecentBlockhash)
+
+	// Sign transaction (frontend - simulated)
+	fmt.Println("🔐 Frontend: Signing transaction with User1's private key...")
+	signedTx, err := signTransactionDemo(unsignedResp.UnsignedTransaction, User1PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Transaction signed\n\n")
+
+	// Submit signed transaction (backend)
+	fmt.Println("📤 Backend: Submitting signed transaction...")
+	signedReq := solprogram.SignedTransactionRequest{
+		TransactionID:     unsignedResp.TransactionID,
+		SignedTransaction: signedTx,
+	}
+
+	createResult, err := client.SubmitSignedTransaction(signedReq)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Envelope created successfully!\n")
+	fmt.Printf("   Signature: %s\n", createResult.Signature)
+	fmt.Printf("   Explorer: %s\n\n", createResult.ExplorerURL)
+
+	// ========================================
+	// STEP 2: Wait for confirmation
+	// ========================================
+	fmt.Println("╔════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  STEP 2: WAIT FOR CONFIRMATION (2-3 seconds)              ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════╝")
+	fmt.Println("⏳ Waiting 3 seconds for transaction to be confirmed...")
+	time.Sleep(3 * time.Second)
+	fmt.Println("✅ Wait complete\n")
+
+	// ========================================
+	// STEP 3: Claim Envelope (Unsigned Transaction)
+	// ========================================
+	fmt.Println("╔════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  STEP 3: CLAIM ENVELOPE (Unsigned Transaction Pattern)    ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════╝")
+
+	// Get claimer's USDC token account
+	claimerTokenAccount, err := client.GetUSDCTokenAddress(User2PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error deriving token account: %v\n", err)
+		return
+	}
+
+	claimParams := solprogram.ClaimEnvelopeParams{
+		Owner:               User1PublicKey,
+		EnvelopeID:          envelopeID,
+		Claimer:             User2PublicKey,
+		ClaimerTokenAccount: claimerTokenAccount,
+	}
+
+	fmt.Printf("📋 Claim Configuration:\n")
+	fmt.Printf("   Envelope ID: %d\n", envelopeID)
+	fmt.Printf("   Claimer: %s\n", User2PublicKey.String())
+	fmt.Printf("   Amount per Claim: %.2f USDC (1/%d share)\n\n", float64(params.TotalAmount)/float64(params.TotalUsers)/1_000_000, params.TotalUsers)
+
+	// Generate unsigned claim transaction (backend)
+	fmt.Println("🔧 Backend: Generating unsigned claim transaction...")
+	unsignedClaimResp, err := client.GenerateUnsignedClaim(claimParams)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Unsigned claim transaction generated\n")
+	fmt.Printf("   Transaction ID: %s\n\n", unsignedClaimResp.TransactionID)
+
+	// Sign transaction (frontend - simulated with User2's key)
+	fmt.Println("🔐 Frontend: Signing transaction with User2's private key...")
+	signedClaimTx, err := signTransactionDemo(unsignedClaimResp.UnsignedTransaction, User2PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Transaction signed\n\n")
+
+	// Submit signed claim transaction (backend)
+	fmt.Println("📤 Backend: Submitting signed claim transaction...")
+	signedClaimReq := solprogram.SignedTransactionRequest{
+		TransactionID:     unsignedClaimResp.TransactionID,
+		SignedTransaction: signedClaimTx,
+	}
+
+	claimResult, err := client.SubmitSignedTransaction(signedClaimReq)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Envelope claimed successfully!\n")
+	fmt.Printf("   Signature: %s\n", claimResult.Signature)
+	fmt.Printf("   Explorer: %s\n\n", claimResult.ExplorerURL)
+
+	// ========================================
+	// STEP 4: Wait for envelope to expire
+	// ========================================
+	fmt.Println("╔════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  STEP 4: WAIT FOR EXPIRY (60 seconds)                     ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════╝")
+	fmt.Println("⏳ Waiting 60 seconds for envelope to expire...")
+	fmt.Println("   (In production, you would check expiry time instead of fixed wait)")
+
+	// Progress indicator
+	for i := 1; i <= 60; i++ {
+		time.Sleep(1 * time.Second)
+		if i%10 == 0 {
+			fmt.Printf("   ⏱️  %d seconds elapsed...\n", i)
+		}
+	}
+	fmt.Println("✅ Envelope expired\n")
+
+	// ========================================
+	// STEP 5: Refund Envelope (Unsigned Transaction)
+	// ========================================
+	fmt.Println("╔════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  STEP 5: REFUND ENVELOPE (Unsigned Transaction Pattern)   ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════╝")
+
+	// Get owner's USDC token account
+	ownerTokenAccount, err := client.GetUSDCTokenAddress(User1PublicKey)
+	if err != nil {
+		fmt.Printf("❌ Error deriving token account: %v\n", err)
+		return
+	}
+
+	refundParams := solprogram.RefundParams{
+		Owner:             User1PublicKey,
+		EnvelopeID:        envelopeID,
+		OwnerTokenAccount: ownerTokenAccount,
+	}
+
+	fmt.Printf("📋 Refund Configuration:\n")
+	fmt.Printf("   Envelope ID: %d\n", envelopeID)
+	fmt.Printf("   Owner: %s\n", User1PublicKey.String())
+	fmt.Printf("   Refund to: %s\n\n", ownerTokenAccount.String())
+
+	// Generate unsigned refund transaction (backend)
+	fmt.Println("🔧 Backend: Generating unsigned refund transaction...")
+	unsignedRefundResp, err := client.GenerateUnsignedRefund(refundParams)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Unsigned refund transaction generated\n")
+	fmt.Printf("   Transaction ID: %s\n\n", unsignedRefundResp.TransactionID)
+
+	// Sign transaction (frontend - simulated with User1's key)
+	fmt.Println("🔐 Frontend: Signing transaction with User1's private key...")
+	signedRefundTx, err := signTransactionDemo(unsignedRefundResp.UnsignedTransaction, User1PrivateKey)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Transaction signed\n\n")
+
+	// Submit signed refund transaction (backend)
+	fmt.Println("📤 Backend: Submitting signed refund transaction...")
+	signedRefundReq := solprogram.SignedTransactionRequest{
+		TransactionID:     unsignedRefundResp.TransactionID,
+		SignedTransaction: signedRefundTx,
+	}
+
+	refundResult, err := client.SubmitSignedTransaction(signedRefundReq)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+	fmt.Printf("✅ Envelope refunded successfully!\n")
+	fmt.Printf("   Signature: %s\n", refundResult.Signature)
+	fmt.Printf("   Explorer: %s\n\n", refundResult.ExplorerURL)
+
+	// ========================================
+	// SUMMARY
+	// ========================================
+	fmt.Println("╔════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  ✅ COMPLETE FLOW FINISHED SUCCESSFULLY!                   ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════╝")
+	fmt.Println("\n📊 Flow Summary:")
+	fmt.Printf("   1. ✅ Created GroupFixed Envelope #%d (3 USDC total, 3 users max, 60s expiry)\n", envelopeID)
+	fmt.Printf("   2. ✅ Waited 3 seconds for confirmation\n")
+	fmt.Printf("   3. ✅ Claimed by User2 (received 1 USDC, 1/3 share)\n")
+	fmt.Printf("   4. ✅ Waited 60 seconds for expiry\n")
+	fmt.Printf("   5. ✅ Refunded remaining 2 USDC (2/3 unclaimed) to User1\n")
+	fmt.Println("\n🔗 Transaction Links:")
+	fmt.Printf("   Create:  %s\n", createResult.ExplorerURL)
+	fmt.Printf("   Claim:   %s\n", claimResult.ExplorerURL)
+	fmt.Printf("   Refund:  %s\n", refundResult.ExplorerURL)
+	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+}
+
+// signTransactionDemo - Helper function to simulate frontend signing (FOR DEMO ONLY)
+// In production, this ONLY happens on frontend with user's wallet, NEVER on backend!
+func signTransactionDemo(unsignedTxBase64 string, privateKey solana.PrivateKey) (string, error) {
+	txBytes, err := base64.StdEncoding.DecodeString(unsignedTxBase64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode transaction: %w", err)
+	}
+
+	decoder := bin.NewBinDecoder(txBytes)
+	var tx solana.Transaction
+	if err := tx.UnmarshalWithDecoder(decoder); err != nil {
+		return "", fmt.Errorf("failed to unmarshal transaction: %w", err)
+	}
+
+	_, err = tx.Sign(func(key solana.PublicKey) *solana.PrivateKey {
+		if privateKey.PublicKey().Equals(key) {
+			return &privateKey
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to sign transaction: %w", err)
+	}
+
+	signedBytes, err := tx.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal signed transaction: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(signedBytes), nil
 }
