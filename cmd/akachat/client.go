@@ -113,8 +113,24 @@ func GetTransaction(signature string) (interface{}, error) {
 
 func extractPayoutFromLogs(logs []string) (string, uint64) {
 	for _, log := range logs {
-		if strings.Contains(log, "Claim success:") && strings.Contains(log, "Amount=") {
-			parts := strings.Split(log, "Amount=")
+		// Trim "Program log: " prefix if exists
+		cleanLog := strings.TrimPrefix(log, "Program log: ")
+		cleanLog = strings.TrimSpace(cleanLog)
+
+		// Priority 1: Try "Claim amount: XXXXX" (simple format)
+		if strings.HasPrefix(cleanLog, "Claim amount:") {
+			parts := strings.Split(cleanLog, "Claim amount:")
+			if len(parts) >= 2 {
+				amountStr := strings.TrimSpace(parts[1])
+				if amount, err := strconv.ParseUint(amountStr, 10, 64); err == nil {
+					return "Claim", amount
+				}
+			}
+		}
+
+		// Priority 2: Try "Claim success: Claimer=..., Amount=XXXXX, Progress=..."
+		if strings.Contains(cleanLog, "Claim success:") && strings.Contains(cleanLog, "Amount=") {
+			parts := strings.Split(cleanLog, "Amount=")
 			if len(parts) >= 2 {
 				amountPart := parts[1]
 				amountStr := strings.TrimSpace(strings.Split(amountPart, ",")[0])
@@ -124,23 +140,14 @@ func extractPayoutFromLogs(logs []string) (string, uint64) {
 			}
 		}
 
-		if strings.Contains(log, "Refund success:") && strings.Contains(log, "Amount=") {
-			parts := strings.Split(log, "Amount=")
+		// Priority 3: Try "Refund success: Owner=..., Amount=XXXXX, RemainingInEnvelope=..."
+		if strings.Contains(cleanLog, "Refund success:") && strings.Contains(cleanLog, "Amount=") {
+			parts := strings.Split(cleanLog, "Amount=")
 			if len(parts) >= 2 {
 				amountPart := parts[1]
 				amountStr := strings.TrimSpace(strings.Split(amountPart, ",")[0])
 				if amount, err := strconv.ParseUint(amountStr, 10, 64); err == nil {
 					return "Refund", amount
-				}
-			}
-		}
-
-		if strings.Contains(log, "Claim amount:") {
-			parts := strings.Split(log, "Claim amount:")
-			if len(parts) >= 2 {
-				amountStr := strings.TrimSpace(parts[1])
-				if amount, err := strconv.ParseUint(amountStr, 10, 64); err == nil {
-					return "Claim", amount
 				}
 			}
 		}
